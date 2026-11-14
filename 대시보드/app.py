@@ -157,7 +157,7 @@ for rule in 규칙.RULES:
         st.caption(rule.desc)
         if not on:
             continue
-        cfg: dict = {}
+        cfg: dict = {}  
         if rule.id == "unify":
             cfg = unify_ui(cur)
         elif rule.id == "flag":
