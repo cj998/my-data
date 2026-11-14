@@ -1,0 +1,936 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>데이터 정제 대시보드</title>
+<!-- XLSX/XLS 읽기용 (CSV는 자체 파서로 처리하므로 오프라인에서도 동작) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --surface-2:#f0f2f5; --border:#e1e4e9;
+  --text:#1b1f24; --muted:#5d6876; --accent:#2f6fde; --accent-soft:#e7effc;
+  --warn:#9a5b00; --warn-soft:#fff2db; --bad:#b93434; --bad-soft:#fde8e8;
+  --good:#1d7f47; --good-soft:#e3f5ea; --changed:#fff1b8; --removed:#fde8e8;
+  --shadow:0 1px 2px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121418; --surface:#1a1d22; --surface-2:#22262c; --border:#2e333a;
+    --text:#e6e9ed; --muted:#9aa4b1; --accent:#6c9cf0; --accent-soft:#1f2c44;
+    --warn:#f0b65a; --warn-soft:#3a2c14; --bad:#ef7b7b; --bad-soft:#3d1f1f;
+    --good:#5fcf8c; --good-soft:#173324; --changed:#4a3f12; --removed:#3d1f1f;
+    --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121418; --surface:#1a1d22; --surface-2:#22262c; --border:#2e333a;
+  --text:#e6e9ed; --muted:#9aa4b1; --accent:#6c9cf0; --accent-soft:#1f2c44;
+  --warn:#f0b65a; --warn-soft:#3a2c14; --bad:#ef7b7b; --bad-soft:#3d1f1f;
+  --good:#5fcf8c; --good-soft:#173324; --changed:#4a3f12; --removed:#3d1f1f;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.5 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif}
+.wrap{max-width:1280px;margin:0 auto;padding:20px 16px 60px}
+header.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+h1{font-size:20px;margin:0}
+h2{font-size:16px;margin:0}
+.sub{color:var(--muted);font-size:13px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);padding:16px;margin-bottom:16px}
+.card-head{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.step{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;flex:none}
+.drop{border:2px dashed var(--border);border-radius:10px;padding:28px 16px;text-align:center;cursor:pointer;transition:.15s}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop b{color:var(--accent)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+label.ctl{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+select,input[type=number],input[type=text]{font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 8px;min-width:120px}
+button{font:inherit;cursor:pointer;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:7px 12px}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.5;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:5px 10px;font-size:12px}
+.seg button.on{background:var(--accent);color:#fff}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
+.tile{background:var(--surface-2);border-radius:8px;padding:10px 12px}
+.tile .k{font-size:12px;color:var(--muted)}
+.tile .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.tile .d{font-size:12px;color:var(--muted)}
+.scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;vertical-align:top}
+th{background:var(--surface-2);position:sticky;top:0;z-index:1;font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tr.clickable{cursor:pointer}
+tr.clickable:hover td{background:var(--accent-soft)}
+.rawprev td{max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.rawprev tr.hdr td{background:var(--accent-soft);font-weight:700}
+.rawprev tr.above td{color:var(--muted);opacity:.6}
+.rn{color:var(--muted);font-size:12px}
+.bar{display:inline-block;width:60px;height:6px;background:var(--surface-2);border-radius:3px;vertical-align:middle;margin-right:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;margin:1px 3px 1px 0;background:var(--surface-2);color:var(--muted)}
+.badge.warn{background:var(--warn-soft);color:var(--warn)}
+.badge.bad{background:var(--bad-soft);color:var(--bad)}
+.badge.type{background:var(--accent-soft);color:var(--accent)}
+.empty{color:var(--muted);padding:18px;text-align:center;border:1px dashed var(--border);border-radius:8px}
+.rules{display:flex;flex-direction:column;gap:6px}
+.rule{padding:8px 10px;border:1px solid var(--border);border-radius:8px}
+.rule.on{border-color:var(--accent)}
+.rule-head{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.rule-cfg{margin:10px 0 2px 24px;font-size:13px}
+.cfg-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.rule-cfg select{min-width:0;max-width:100%}
+.rule input{margin-top:3px}
+.rule .t{font-weight:600}
+.rule .ds{font-size:12px;color:var(--muted)}
+.rule .res{margin-left:auto;font-size:12px;color:var(--muted);text-align:right;white-space:nowrap}
+.arrow{color:var(--muted);margin:0 6px}
+.headline{font-size:18px;font-weight:700;margin:6px 0 12px}
+.headline .from{color:var(--muted)}
+.delta.up{color:var(--good)} .delta.down{color:var(--bad)} .delta.zero{color:var(--muted)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:760px){.grid2{grid-template-columns:1fr}}
+td.chg{background:var(--changed)}
+td.ws{white-space:pre}
+.ws-mark{background:var(--warn-soft);border-radius:2px}
+.hidden{display:none!important}
+.status{font-size:12px;color:var(--muted)}
+.err{color:var(--bad)}
+code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>데이터 정제 대시보드</h1>
+      <div class="sub">파일은 이 브라우저 안에서만 처리되고, 어디에도 업로드되지 않습니다.</div>
+    </div>
+    <div class="seg" id="themeSeg">
+      <button data-t="auto" class="on">자동</button><button data-t="light">라이트</button><button data-t="dark">다크</button>
+    </div>
+  </header>
+
+  <!-- ① 파일 · 구조 -->
+  <section class="card">
+    <div class="card-head"><span class="step">1</span><h2>파일 불러오기 · 구조 확인</h2><span class="status" id="loadStatus"></span></div>
+    <div class="drop" id="drop">
+      <div><b>XLSX · XLS · CSV · TSV</b> 파일을 여기로 끌어다 놓거나 클릭해서 선택하세요</div>
+      <div class="sub" id="fileLabel">선택된 파일 없음</div>
+      <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt" hidden>
+    </div>
+
+    <div id="structure" class="hidden">
+      <div class="row" style="margin-top:14px">
+        <label class="ctl">시트<select id="sheetSel"></select></label>
+        <label class="ctl">머리글 줄 (원본 기준 번호)<input type="number" id="hdrInput" min="1" value="1"></label>
+        <label class="ctl" id="encWrap">CSV 인코딩<select id="encSel"><option value="auto">자동</option><option value="utf-8">UTF-8</option><option value="euc-kr">EUC-KR / CP949</option></select></label>
+        <div class="sub" style="align-self:flex-end">아래 미리보기에서 줄을 클릭해도 머리글로 정할 수 있습니다.</div>
+      </div>
+      <div class="scroll rawprev" style="max-height:260px;margin-top:10px"><table id="rawTable"></table></div>
+
+      <div class="tiles" id="structTiles"></div>
+
+      <div class="row" style="justify-content:space-between;margin-bottom:8px">
+        <div><b>칸별 요약</b> <span class="sub">— 줄을 클릭하면 ③ 비교에서 해당 컬럼을 엽니다</span></div>
+        <div class="seg" id="sumSeg"><button data-v="orig" class="on">원본</button><button data-v="clean">정제 후</button></div>
+      </div>
+      <div class="scroll" style="max-height:520px"><table id="sumTable"></table></div>
+    </div>
+  </section>
+
+  <!-- ② 정제 규칙 -->
+  <section class="card hidden" id="rulesCard">
+    <div class="card-head"><span class="step">2</span><h2>정제 규칙</h2><span class="sub">체크한 규칙이 위에서 아래 순서로 적용됩니다</span></div>
+    <div class="row" style="margin-bottom:10px">
+      <button id="allOn">전체 선택</button><button id="allOff">전체 해제</button>
+    </div>
+    <div class="rules" id="ruleList"></div>
+    <div class="tiles" id="cleanTiles"></div>
+  </section>
+
+  <!-- ③ 컬럼 비교 -->
+  <section class="card hidden" id="cmpCard">
+    <div class="card-head"><span class="step">3</span><h2>컬럼별 원본 ↔ 정제 후 비교</h2></div>
+    <div class="row"><label class="ctl">컬럼<select id="colSel"></select></label></div>
+    <div id="cmpBody"></div>
+  </section>
+
+  <!-- 미리보기 -->
+  <section class="card hidden" id="prevCard">
+    <div class="card-head"><h2>데이터 미리보기</h2><span class="sub">앞에서부터 100줄 · 노란 칸 = 정제로 바뀐 값 (마우스를 올리면 원래 값)</span></div>
+    <div class="seg" id="prevSeg" style="margin-bottom:10px"><button data-v="orig">원본</button><button data-v="clean" class="on">정제 후</button></div>
+    <div class="scroll" style="max-height:420px"><table id="prevTable"></table></div>
+  </section>
+
+  <!-- ④ 다운로드 -->
+  <section class="card hidden" id="dlCard">
+    <div class="card-head"><span class="step">4</span><h2>정제된 데이터 다운로드</h2></div>
+    <div class="row">
+      <label class="ctl">파일 이름<input type="text" id="dlName" style="min-width:240px"></label>
+      <label class="sub" style="align-self:flex-end"><input type="checkbox" id="dlRowNo"> 원본 행 번호(<code>_row</code>) 포함</label>
+      <button class="primary" id="dlCsv" style="align-self:flex-end">CSV 다운로드</button>
+      <button class="primary" id="dlJson" style="align-self:flex-end">JSON 다운로드</button>
+    </div>
+    <div class="sub" style="margin-top:8px">CSV는 엑셀에서 한글이 깨지지 않도록 UTF-8(BOM)으로 저장됩니다.</div>
+  </section>
+</div>
+
+<script>
+/* =====================================================================
+   정제 규칙 등록 위치  (지금은 비어 있음 — 규칙은 추후 정의)
+   ---------------------------------------------------------------------
+   규칙 하나 = 아래 모양의 객체. 배열 순서대로 실행됩니다.
+
+   {
+     id:    'trim',                         // 고유 키
+     label: '앞뒤 공백 제거',                 // 체크박스 제목
+     desc:  '모든 칸의 앞뒤 공백을 지웁니다',   // 설명 (선택)
+     apply(table, H) {
+       // table = { headers: ['이름', ...], rows: [{ id: 원본행번호, c: [값, ...] }, ...] }
+       // table은 복사본이므로 직접 고쳐도 됩니다. 고친 table을 return 하거나 그냥 끝내면 됩니다.
+       // 행 삭제: table.rows = table.rows.filter(...)
+       // 컬럼 추가/삭제: headers 와 각 row.c 를 같이 바꾸세요.
+       // H = 도움 함수 (H.isBlank, H.mapCells, H.filterRows, H.colIndex, H.strictNum)
+     }
+   }
+   ===================================================================== */
+/* ---------- 규칙에서 쓰는 상수 · 함수 ---------- */
+// 가: 공백 + 눈에 안 보이는 글자 (제어문자, 소프트하이픈, 제로폭/방향 표시, BOM 등)
+const INVIS = '\\s\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u200B-\\u200F\\u2028-\\u202F\\u2060-\\u2064\\uFEFF';
+const EDGE_INVIS = new RegExp(`^[${INVIS}]+|[${INVIS}]+$`, 'g');
+const EDGE_INVIS_TEST = new RegExp(`^[${INVIS}]|[${INVIS}]$`);
+// 나: 칸 전체가 이 표기일 때만 빈칸으로 (영문은 대소문자 무시)
+const BLANK_MARKS = new Set(['-', 'n/a', '없음', 'null']);
+// 다: 연도가 앞에 오는 날짜만 → YYYY-MM-DD (없는 날짜·시간 붙은 값·연도가 뒤에 오는 모양은 null = 그대로 둠)
+function toISODate(s) {
+  let m = s.match(/^(\d{4})\s*([-./])\s*(\d{1,2})\s*\2\s*(\d{1,2})\s*\.?$/), y, mo, d;
+  if (m) { y = +m[1]; mo = +m[3]; d = +m[4]; }
+  else if ((m = s.match(/^(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일$/))) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+// 라: 천 단위 쉼표 · 뒤 단위(원 점 건 개 분 %)만 떼기. 환산 없음. 쉼표도 단위도 없으면 null(손대지 않음)
+function cleanNumber(s) {
+  const m = s.match(/^([+-]?)(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(\s*(?:원|점|건|개|분|%))?$/);
+  if (!m || (!m[2].includes(',') && !m[4])) return null;
+  const digits = m[2].replace(/,/g, ''), out = m[1] + digits + (m[3] || '');
+  if ((digits.length > 1 && digits[0] === '0') || digits.length > 15) return out; // 앞자리 0·아주 긴 숫자는 글자 그대로 보존
+  return Number(out);
+}
+// 마: 대소문자·띄어쓰기만 다른 표기를 같은 묶음으로 보는 키
+const normKey = s => s.toLowerCase().replace(/\s+/g, '');
+function unifyCandidates(t) {
+  const out = {};
+  t.headers.forEach((h, i) => {
+    const m = new Map();
+    for (const r of t.rows) {
+      const v = r.c[i]; if (typeof v !== 'string' || v === '') continue;
+      const k = normKey(v); if (!k) continue;
+      let g = m.get(k); if (!g) m.set(k, g = new Map());
+      g.set(v, (g.get(v) || 0) + 1);
+    }
+    const groups = [];
+    for (const [key, g] of m) if (g.size > 1) groups.push({ key, variants: [...g.entries()].sort((a, b) => b[1] - a[1]) });
+    if (groups.length) {
+      const tot = g => g.variants.reduce((a, v) => a + v[1], 0);
+      out[h] = groups.sort((a, b) => tot(b) - tot(a));
+    }
+  });
+  return out;
+}
+// 사: 사분위 범위(IQR) 기준 정상 범위. 값이 8개 미만이거나 IQR=0이면 판단하지 않음
+function iqrBounds(vals, k) {
+  if (vals.length < 8) return null;
+  const s = Float64Array.from(vals).sort(), q = p => { const pos = (s.length - 1) * p, lo = Math.floor(pos), hi = Math.ceil(pos); return s[lo] + (s[hi] - s[lo]) * (pos - lo); };
+  const q1 = q(.25), q3 = q(.75), iqr = q3 - q1;
+  return iqr > 0 ? { lo: q1 - k * iqr, hi: q3 + k * iqr } : null;
+}
+
+const RULES = [
+  {
+    id: 'trim', label: '가. 공백 떼기',
+    desc: '값 앞뒤의 공백·탭·줄바꿈·제로폭 공백 같은 보이지 않는 글자를 지웁니다. 가운데 공백은 그대로 둡니다.',
+    apply(t, H) { H.mapCells(t, v => typeof v === 'string' ? v.replace(EDGE_INVIS, '') : v); },
+  },
+  {
+    id: 'blank', label: '나. 빈칸 표기 맞추기',
+    desc: '칸 전체가 - · N/A · 없음 · null 인 경우만 빈칸으로 바꿉니다. 0, 미응답 같은 값은 그대로 둡니다.',
+    apply(t, H) { H.mapCells(t, v => typeof v === 'string' && BLANK_MARKS.has(v.toLowerCase()) ? '' : v); },
+  },
+  {
+    id: 'date', label: '다. 날짜 모양 맞추기',
+    desc: '2025/03/14 · 2025.3.14 · 2025년 3월 14일처럼 연도가 앞에 오는 날짜를 2025-03-14로 바꿉니다. 03/14/2025처럼 연도가 뒤에 오는 모양, 시간이 붙은 값, 없는 날짜는 그대로 둡니다.',
+    apply(t, H) { H.mapCells(t, v => typeof v === 'string' ? (toISODate(v) ?? v) : v); },
+  },
+  {
+    id: 'num', label: '라. 숫자 다듬기',
+    desc: '89,000원 → 89000, 12% → 12처럼 천 단위 쉼표와 뒤에 붙은 원·점·건·개·분·%만 뗍니다. 단위 환산은 하지 않습니다. (₩ 같은 앞 기호, 그 밖의 단위는 그대로)',
+    apply(t, H) { H.mapCells(t, v => typeof v === 'string' ? (cleanNumber(v) ?? v) : v); },
+  },
+  {
+    id: 'unify', label: '마. 표기 하나로',
+    desc: '대소문자·띄어쓰기만 다른 표기 중 직접 체크한 묶음만 하나로 맞춥니다. 뜻만 같은 다른 말(유선/전화 등)은 후보에 나오지 않습니다.',
+    defaultCfg: () => ({ view: '', picks: {} }),
+    ui(input, cfg) {
+      const c = unifyCandidates(input), cols = Object.keys(c);
+      const nPick = Object.values(cfg.picks).reduce((a, m) => a + Object.keys(m).length, 0);
+      if (!cols.length) return `<div class="sub">대소문자·띄어쓰기만 다른 표기가 없습니다.${nPick ? ` (예전에 고른 ${nPick}묶음은 해당 값이 없어 적용되지 않음)` : ''}</div>`;
+      if (!c[cfg.view]) cfg.view = cols[0];
+      const pc = col => Object.keys(cfg.picks[col] || {}).length;
+      const pk = cfg.picks[cfg.view] || {};
+      let h = `<div class="cfg-row">칸 <select data-rule="unify" data-cfg="view">${cols.map(col => `<option value="${esc(col)}" ${col === cfg.view ? 'selected' : ''}>${esc(col)} — 후보 ${c[col].length}묶음${pc(col) ? ` · ${pc(col)}개 선택` : ''}</option>`).join('')}</select>
+        <span class="sub">합칠 묶음을 체크하고 남길 표기를 고르세요. 전체 ${nPick}묶음 선택됨</span></div>`;
+      h += `<div class="scroll" style="max-height:280px"><table><tr><th>합치기</th><th>섞여 있는 표기 (개수)</th><th>이렇게 맞춤</th></tr>`;
+      const groups = c[cfg.view];
+      for (const g of groups.slice(0, 300)) {
+        const on = Object.hasOwn(pk, g.key), sel = on ? pk[g.key] : g.variants[0][0];
+        h += `<tr><td><input type="checkbox" data-rule="unify" data-cfg="pick" data-key="${esc(g.key)}" ${on ? 'checked' : ''}></td>
+          <td class="ws">${g.variants.map(([v, n]) => `${showVal(v)} <span class="rn">(${fmt(n)})</span>`).join(' · ')}</td>
+          <td><select data-rule="unify" data-cfg="canon" data-key="${esc(g.key)}">${g.variants.map(([v]) => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></td></tr>`;
+      }
+      h += '</table></div>' + (groups.length > 300 ? `<div class="sub">후보가 많아 앞 300묶음만 표시합니다 (전체 ${fmt(groups.length)})</div>` : '');
+      return h;
+    },
+    onCfg(el, cfg) {
+      if (el.dataset.cfg === 'view') { cfg.view = el.value; return 'ui'; }
+      const p = cfg.picks[cfg.view] || (cfg.picks[cfg.view] = {}), key = el.dataset.key;
+      if (el.dataset.cfg === 'pick') {
+        if (el.checked) p[key] = el.closest('tr').querySelector('select').value; else delete p[key];
+        return true;
+      }
+      if (el.dataset.cfg === 'canon' && Object.hasOwn(p, key)) { p[key] = el.value; return true; }
+      return false;
+    },
+    apply(t, H, cfg) {
+      for (const [col, map] of Object.entries(cfg.picks)) {
+        const i = t.headers.indexOf(col); if (i < 0 || !Object.keys(map).length) continue;
+        for (const r of t.rows) {
+          const v = r.c[i]; if (typeof v !== 'string') continue;
+          const k = normKey(v); if (Object.hasOwn(map, k)) r.c[i] = map[k];
+        }
+      }
+    },
+  },
+  {
+    id: 'dedup', label: '바. 겹친 줄 지우기',
+    desc: '모든 칸의 값이 완전히 똑같은 줄만 첫 줄 하나를 남기고 지웁니다. 일부 칸만 같은 줄은 남깁니다.',
+    apply(t) {
+      const seen = new Set();
+      t.rows = t.rows.filter(r => { const k = rowKey(r); if (seen.has(k)) return false; seen.add(k); return true; });
+    },
+  },
+  {
+    id: 'flag', label: '사. 튀는 값 표시',
+    desc: '숫자 칸(값의 80% 이상이 숫자)에서 음수와 동떨어진 값을 찾아 맨 끝 _표시 칸에 적습니다. 원래 행과 값은 바꾸지 않습니다.',
+    defaultCfg: () => ({ k: 3, info: null }),
+    ui(input, cfg) {
+      let h = `<div class="cfg-row">동떨어진 값 기준 <select data-rule="flag" data-cfg="k">
+        <option value="3" ${cfg.k === 3 ? 'selected' : ''}>아주 동떨어진 값만 (Q1−3×IQR 미만, Q3+3×IQR 초과)</option>
+        <option value="1.5" ${cfg.k === 1.5 ? 'selected' : ''}>보통 (Q1−1.5×IQR 미만, Q3+1.5×IQR 초과)</option></select>
+        <span class="sub">IQR = 가운데 50% 값의 폭. 숫자가 8개 미만이거나 값이 거의 같으면 이상치는 판단하지 않고 음수만 표시합니다.</span></div>`;
+      const info = cfg.info || [];
+      if (!info.length) return h + '<div class="sub">숫자 칸이 없습니다. (라. 숫자 다듬기를 함께 켜면 «89,000원» 같은 칸도 숫자 칸으로 잡힙니다)</div>';
+      h += `<div class="scroll" style="max-height:240px"><table><tr><th>숫자 칸</th><th class="num">숫자 수</th><th class="num">정상 범위</th><th class="num">음수</th><th class="num">이상치</th></tr>` +
+        info.map(x => `<tr><td>${esc(x.h)}</td><td class="num">${fmt(x.n)}</td><td class="num">${x.lo === undefined ? '<span class="rn">판단 안 함</span>' : fmt(x.lo) + ' ~ ' + fmt(x.hi)}</td><td class="num">${fmt(x.neg)}</td><td class="num">${fmt(x.out)}</td></tr>`).join('') + '</table></div>';
+      return h;
+    },
+    onCfg(el, cfg) { cfg.k = +el.value; return true; },
+    apply(t, H, cfg) {
+      const notes = t.rows.map(() => []), info = [];
+      t.headers.forEach((h, i) => {
+        if (h.startsWith('_표시')) return;
+        let filled = 0; const idx = [], vals = [];
+        t.rows.forEach((r, ri) => {
+          const v = r.c[i]; if (H.isBlank(v)) return; filled++;
+          const x = strictNum(v); if (x !== null) { idx.push(ri); vals.push(x); }
+        });
+        if (!vals.length || vals.length < filled * 0.8) return;
+        const b = iqrBounds(vals, cfg.k); let neg = 0, out = 0;
+        idx.forEach((ri, j) => {
+          const x = vals[j], tags = [];
+          if (x < 0) { tags.push('음수'); neg++; }
+          if (b && (x < b.lo || x > b.hi)) { tags.push('이상치'); out++; }
+          if (tags.length) notes[ri].push(`${h}: ${tags.join('·')}(${x})`);
+        });
+        info.push({ h, n: vals.length, lo: b ? b.lo : undefined, hi: b ? b.hi : undefined, neg, out });
+      });
+      let name = '_표시', s = 2; while (t.headers.includes(name)) name = `_표시_${s++}`;
+      t.headers.push(name);
+      t.rows.forEach((r, ri) => r.c.push(notes[ri].join('; ')));
+      cfg.info = info;
+    },
+  },
+];
+const rowKey = r => r.c.map(v => v === null || v === undefined ? '' : String(v)).join('\u0001');
+
+/* ===================== 도움 함수 (규칙에서 사용 가능) ===================== */
+const H = {
+  isBlank: v => v === '' || v === null || v === undefined,
+  strictNum,
+  colIndex: (t, name) => t.headers.indexOf(name),
+  /** 모든 칸(또는 cols에 든 컬럼명만)에 fn(value, colName, row)을 적용 */
+  mapCells(t, fn, cols) {
+    const idx = cols ? cols.map(n => t.headers.indexOf(n)).filter(i => i >= 0) : t.headers.map((_, i) => i);
+    for (const r of t.rows) for (const i of idx) r.c[i] = fn(r.c[i], t.headers[i], r);
+    return t;
+  },
+  filterRows(t, fn) { t.rows = t.rows.filter(fn); return t; },
+};
+
+/* ============================ 상태 ============================ */
+const S = {
+  file: null, baseName: '', kind: '', wb: null, csvBuf: null,
+  sheetNames: [], aoaCache: {}, sheet: '', aoa: [], rowOffset: 0, headerRow: 0,
+  orig: null, clean: null, log: [], checked: new Set(), cfg: {}, ruleInput: {},
+  sumView: 'orig', prevView: 'clean', col: '',
+  profiles: { orig: null, clean: null },
+};
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const NF = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 });
+const fmt = v => (v === null || v === undefined || Number.isNaN(v)) ? '—' : (typeof v === 'number' ? NF.format(v) : String(v));
+
+function strictNum(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(v)) return Number(v);
+  return null;
+}
+function showVal(v) {
+  if (v === '' || v === null || v === undefined) return '<span class="rn">(빈칸)</span>';
+  const s = String(v);
+  if (EDGE_INVIS_TEST.test(s)) return '<span class="ws-mark">' + esc(s).replace(/ /g, '·') + '</span>';
+  return esc(s);
+}
+
+/* ============================ 파일 읽기 ============================ */
+function decodeText(buf, enc) {
+  let txt;
+  if (enc === 'auto' || !enc) {
+    try { txt = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+    catch { txt = new TextDecoder('euc-kr').decode(buf); }
+  } else txt = new TextDecoder(enc).decode(buf);
+  return txt.charCodeAt(0) === 0xFEFF ? txt.slice(1) : txt;
+}
+function sniffDelim(text) {
+  const sample = text.slice(0, 20000).split(/\r?\n/).slice(0, 10);
+  let best = ',', bestScore = -1;
+  for (const d of [',', '\t', ';', '|']) {
+    const counts = sample.map(l => l.split(d).length - 1).filter(c => c > 0);
+    const score = counts.length ? counts.reduce((a, b) => a + b, 0) / sample.length : 0;
+    if (score > bestScore) { bestScore = score; best = d; }
+  }
+  return best;
+}
+function parseCSV(text) {
+  const d = sniffDelim(text), rows = [];
+  let row = [], start = 0, i = 0, n = text.length, field = '', inQ = false, quoted = false;
+  while (i < n) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      }
+      field += ch; i++; continue;
+    }
+    if (ch === '"' && field === '' && !quoted) { inQ = true; quoted = true; i++; continue; }
+    if (ch === d) { row.push(field); field = ''; quoted = false; i++; continue; }
+    if (ch === '\n' || ch === '\r') {
+      row.push(field); rows.push(row); row = []; field = ''; quoted = false;
+      i += (ch === '\r' && text[i + 1] === '\n') ? 2 : 1; continue;
+    }
+    // 일반 문자: 다음 구분자/줄바꿈/따옴표까지 한 번에 붙임 (속도)
+    let j = i + 1;
+    while (j < n) { const c = text[j]; if (c === d || c === '\n' || c === '\r' || c === '"') break; j++; }
+    field += text.slice(i, j); i = j;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+function cellVal(cell) {
+  if (!cell) return '';
+  switch (cell.t) {
+    case 'n': {
+      // 엑셀의 진짜 날짜 칸은 표시 형식과 상관없이 날짜 값이므로 YYYY-MM-DD(시간이 있으면 HH:MM:SS 추가)로 읽음
+      if (!(cell.z && XLSX.SSF.is_date(cell.z))) return cell.v;
+      const p = XLSX.SSF.parse_date_code(cell.v); if (!p) return cell.w ?? cell.v;
+      const z = n => String(n).padStart(2, '0'), time = `${z(p.H)}:${z(p.M)}:${z(p.S)}`;
+      if (cell.v < 1) return time;
+      const date = `${p.y}-${z(p.m)}-${z(p.d)}`;
+      return (p.H || p.M || p.S) ? `${date} ${time}` : date;
+    }
+    case 's': return cell.v ?? '';
+    case 'b': return cell.v;
+    case 'd': return cell.w || (cell.v instanceof Date ? cell.v.toISOString().slice(0, 10) : String(cell.v));
+    case 'e': return cell.w || '#ERROR';
+    case 'z': return '';
+    default: return cell.w ?? cell.v ?? '';
+  }
+}
+function sheetToAOA(ws) {
+  if (!ws || !ws['!ref']) return { aoa: [], off: 0 };
+  const r = XLSX.utils.decode_range(ws['!ref']);
+  const cols = []; for (let C = r.s.c; C <= r.e.c; C++) cols.push(XLSX.utils.encode_col(C));
+  const out = [];
+  for (let R = r.s.r; R <= r.e.r; R++) {
+    const rr = String(R + 1), row = new Array(cols.length);
+    for (let k = 0; k < cols.length; k++) row[k] = cellVal(ws[cols[k] + rr]);
+    out.push(row);
+  }
+  return { aoa: out, off: r.s.r };
+}
+function trimTrailingBlank(aoa) {
+  const blank = r => r.every(v => v === '' || v === null || v === undefined);
+  let e = aoa.length; while (e > 0 && blank(aoa[e - 1])) e--;
+  aoa.length = e;
+  return aoa;
+}
+
+async function loadFile(file) {
+  status('읽는 중…');
+  S.file = file;
+  S.baseName = file.name.replace(/\.[^.]+$/, '');
+  $('fileLabel').textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
+  const ext = file.name.split('.').pop().toLowerCase();
+  const buf = await file.arrayBuffer();
+  S.aoaCache = {}; initCfg();
+  try {
+    if (['csv', 'tsv', 'txt'].includes(ext)) {
+      S.kind = 'csv'; S.csvBuf = buf; S.wb = null; S.sheetNames = ['(CSV)'];
+    } else {
+      if (!window.XLSX) throw new Error('엑셀 읽기 라이브러리를 불러오지 못했습니다 (인터넷 연결 필요). CSV는 오프라인에서도 됩니다.');
+      S.kind = 'xlsx'; S.csvBuf = null;
+      S.wb = XLSX.read(buf, { type: 'array', cellNF: true, cellDates: false, dense: false });
+      S.sheetNames = S.wb.SheetNames.slice();
+    }
+  } catch (e) { status(e.message, true); return; }
+  $('encWrap').classList.toggle('hidden', S.kind !== 'csv');
+  $('sheetSel').innerHTML = S.sheetNames.map(n => `<option>${esc(n)}</option>`).join('');
+  $('dlName').value = S.baseName + '_정제';
+  ['structure', 'rulesCard', 'cmpCard', 'prevCard', 'dlCard'].forEach(id => $(id).classList.remove('hidden'));
+  selectSheet(S.sheetNames[0]);
+}
+function getAOA(name) {
+  if (S.aoaCache[name]) return S.aoaCache[name];
+  let res;
+  if (S.kind === 'csv') res = { aoa: parseCSV(decodeText(S.csvBuf, $('encSel').value)), off: 0 };
+  else res = sheetToAOA(S.wb.Sheets[name]);
+  trimTrailingBlank(res.aoa);
+  return (S.aoaCache[name] = res);
+}
+function guessHeaderRow(aoa) {
+  const look = aoa.slice(0, 20).map(r => r.filter(v => v !== '' && v != null).length);
+  const max = Math.max(0, ...look);
+  const i = look.findIndex(c => c >= max * 0.6 && c > 0);
+  return i < 0 ? 0 : i;
+}
+function selectSheet(name) {
+  S.sheet = name;
+  const { aoa, off } = getAOA(name);
+  S.aoa = aoa; S.rowOffset = off;
+  S.headerRow = guessHeaderRow(aoa);
+  applyHeader();
+}
+function setHeaderRow(i) {
+  S.headerRow = Math.max(0, Math.min(i, Math.max(0, S.aoa.length - 1)));
+  applyHeader();
+}
+
+/* ============================ 표 만들기 ============================ */
+function buildTable(aoa, hr, off) {
+  let ncol = 0; for (const r of aoa) if (r.length > ncol) ncol = r.length;
+  const hraw = aoa[hr] || [], seen = new Map(), headers = [];
+  for (let i = 0; i < ncol; i++) {
+    let h = String(hraw[i] ?? '').trim() || `열${i + 1}`;
+    if (seen.has(h)) { const k = seen.get(h) + 1; seen.set(h, k); h = `${h}_${k}`; } else seen.set(h, 1);
+    headers.push(h);
+  }
+  const rows = [];
+  for (let r = hr + 1; r < aoa.length; r++) {
+    const src = aoa[r], c = new Array(ncol);
+    for (let i = 0; i < ncol; i++) c[i] = src[i] === undefined || src[i] === null ? '' : src[i];
+    rows.push({ id: r + off + 1, c });
+  }
+  return { headers, rows };
+}
+const cloneTable = t => ({ headers: t.headers.slice(), rows: t.rows.map(r => ({ id: r.id, c: r.c.slice() })) });
+
+function diffTables(a, b) {
+  const bm = new Map(); for (const r of b.rows) bm.set(r.id, r);
+  const am = new Set(a.rows.map(r => r.id));
+  const common = a.headers.map((h, i) => [i, b.headers.indexOf(h)]).filter(p => p[1] >= 0);
+  let removed = 0, changed = 0;
+  for (const r of a.rows) {
+    const o = bm.get(r.id);
+    if (!o) { removed++; continue; }
+    for (const [i, j] of common) if (r.c[i] !== o.c[j]) changed++;
+  }
+  let added = 0; for (const r of b.rows) if (!am.has(r.id)) added++;
+  return {
+    removed, added, changed,
+    colsRemoved: a.headers.filter(h => !b.headers.includes(h)).length,
+    colsAdded: b.headers.filter(h => !a.headers.includes(h)).length,
+  };
+}
+
+function initCfg() { S.cfg = {}; for (const r of RULES) S.cfg[r.id] = r.defaultCfg ? r.defaultCfg() : {}; }
+function runPipeline() {
+  let t = S.orig; const log = []; S.ruleInput = {};
+  for (const rule of RULES) {
+    if (!S.checked.has(rule.id)) continue;
+    S.ruleInput[rule.id] = t;
+    const work = cloneTable(t);
+    try {
+      const out = rule.apply(work, H, S.cfg[rule.id]) || work;
+      log.push({ id: rule.id, ...diffTables(t, out) });
+      t = out;
+    } catch (e) { log.push({ id: rule.id, error: e.message }); console.error(rule.id, e); }
+  }
+  S.clean = t === S.orig ? cloneTable(t) : t;
+  S.log = log;
+}
+
+/* ============================ 프로파일 (칸 요약) ============================ */
+const BOOL_WORDS = new Set(['TRUE', 'FALSE', 'Y', 'N', 'YES', 'NO', 'O', 'X', '예', '아니오', '아니요', '완료', '미완료', '진행중', '참', '거짓', '○', '×', '✓', '✔']);
+const UNIT_NUM = /^[+-]?[₩$€¥£]?\s*[+-]?[\d,]*\d(\.\d+)?\s*[^\d\s]{0,4}$/;
+function datePattern(s) {
+  let m;
+  if ((m = s.match(/^(\d{4})([-./])\d{1,2}\2\d{1,2}(\s|T|$)/))) return `YYYY${m[2]}MM${m[2]}DD`;
+  if ((m = s.match(/^\d{1,2}([-./])\d{1,2}\1\d{2,4}(\s|$)/))) return `MM${m[1]}DD${m[1]}YY`;
+  if (/^\d{4}\s*년\s*\d{1,2}\s*월(\s*\d{1,2}\s*일)?/.test(s)) return 'YYYY년 M월 D일';
+  if (/^(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(s)) return 'YYYYMMDD';
+  return null;
+}
+function profileCol(t, i) {
+  const rows = t.rows, n = rows.length;
+  let filled = 0, ws = 0, unitNum = 0, ph = 0, boolLike = 0, dateLike = 0;
+  const nums = [], freq = new Map(), datePats = new Map(), boolForms = new Set();
+  for (let k = 0; k < n; k++) {
+    const v = rows[k].c[i];
+    if (v === '' || v === null || v === undefined) continue;
+    filled++;
+    const key = String(v);
+    freq.set(key, (freq.get(key) || 0) + 1);
+    const num = strictNum(v);
+    if (num !== null) { nums.push(num); continue; }
+    if (typeof v === 'boolean') { boolLike++; boolForms.add(String(v).toUpperCase()); continue; }
+    const tr = key.replace(EDGE_INVIS, '');
+    if (tr !== key) ws++;
+    if (tr === '' || BLANK_MARKS.has(tr.toLowerCase())) { ph++; continue; }
+    const up = tr.toUpperCase();
+    if (BOOL_WORDS.has(up)) { boolLike++; boolForms.add(up); continue; }
+    const dp = datePattern(tr);
+    if (dp) { dateLike++; datePats.set(dp, (datePats.get(dp) || 0) + 1); continue; }
+    if (UNIT_NUM.test(tr)) unitNum++;
+  }
+  const st = numStats(nums);
+  const top = [...freq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const share = x => filled ? x / filled : 0;
+  let type;
+  if (!filled) type = '비어 있음';
+  else if (share(nums.length) >= 0.95) type = '숫자';
+  else if (share(dateLike) >= 0.8) type = '날짜';
+  else if (share(boolLike) >= 0.8) type = '참/거짓';
+  else if (share(nums.length + unitNum) >= 0.8) type = '숫자(혼합)';
+  else if (freq.size <= Math.max(20, filled * 0.05)) type = '범주';
+  else type = '텍스트';
+  return {
+    name: t.headers[i], n, filled, empty: n - filled, unique: freq.size, top, type,
+    numCount: nums.length, ...st,
+    hints: { ws, unitNum, ph, datePats: datePats.size, boolForms: boolForms.size, dateLike, boolLike },
+  };
+}
+function numStats(nums) {
+  const m = nums.length;
+  if (!m) return { mean: null, median: null, min: null, max: null, sum: null, std: null, outliers: 0, negatives: 0 };
+  const s = Float64Array.from(nums).sort();
+  let sum = 0; for (const x of s) sum += x;
+  const mean = sum / m;
+  let vs = 0; for (const x of s) vs += (x - mean) ** 2;
+  const q = p => { const pos = (m - 1) * p, lo = Math.floor(pos), hi = Math.ceil(pos); return s[lo] + (s[hi] - s[lo]) * (pos - lo); };
+  const q1 = q(.25), q3 = q(.75), iqr = q3 - q1, med = q(.5);
+  let outliers = 0, negatives = 0;
+  if (m >= 8 && iqr > 0) for (const x of s) if (x < q1 - 3 * iqr || x > q3 + 3 * iqr) outliers++;
+  if (med > 0) for (const x of s) { if (x < 0) negatives++; else break; }
+  return { mean, median: med, min: s[0], max: s[m - 1], sum, std: Math.sqrt(vs / m), outliers, negatives };
+}
+function profileAll(t) { return t.headers.map((_, i) => profileCol(t, i)); }
+function dupRows(t) {
+  const seen = new Set(); let d = 0;
+  for (const r of t.rows) { const k = rowKey(r); if (seen.has(k)) d++; else seen.add(k); }
+  return d;
+}
+function blankRows(t) { let b = 0; for (const r of t.rows) if (r.c.every(v => v === '' || v == null)) b++; return b; }
+
+/* ============================ 흐름 ============================ */
+function applyHeader() {
+  status('분석 중…');
+  setTimeout(() => {
+    S.orig = buildTable(S.aoa, S.headerRow, S.rowOffset);
+    S.profiles.orig = profileAll(S.orig);
+    S.origDup = dupRows(S.orig); S.origBlank = blankRows(S.orig);
+    if (!S.orig.headers.includes(S.col)) S.col = S.orig.headers[0] || '';
+    renderRaw(); renderStructTiles();
+    recompute();
+    status('');
+  }, 10);
+}
+function recompute() {
+  runPipeline();
+  S.profiles.clean = profileAll(S.clean);
+  renderRules(); renderCleanTiles(); renderSummary(); renderColSel(); renderCompare(); renderPreview();
+}
+
+/* ============================ 렌더링 ============================ */
+function status(msg, err) { const el = $('loadStatus'); el.textContent = msg; el.classList.toggle('err', !!err); }
+
+function renderRaw() {
+  $('hdrInput').value = S.headerRow + S.rowOffset + 1;
+  $('hdrInput').max = S.aoa.length + S.rowOffset;
+  const show = Math.min(S.aoa.length, Math.max(30, S.headerRow + 10));
+  const ncol = Math.min(30, Math.max(0, ...S.aoa.slice(0, show).map(r => r.length)));
+  let h = `<tr><th class="rn">줄</th>${Array.from({ length: ncol }, (_, i) => `<th>${colLetter(i)}</th>`).join('')}</tr>`;
+  for (let r = 0; r < show; r++) {
+    const cls = r === S.headerRow ? 'hdr' : r < S.headerRow ? 'above' : '';
+    h += `<tr class="clickable ${cls}" data-r="${r}"><td class="rn">${r + S.rowOffset + 1}${r === S.headerRow ? ' ★' : ''}</td>` +
+      Array.from({ length: ncol }, (_, i) => `<td title="${esc(S.aoa[r][i] ?? '')}">${esc(S.aoa[r][i] ?? '')}</td>`).join('') + '</tr>';
+  }
+  $('rawTable').innerHTML = h;
+}
+function colLetter(i) { let s = ''; i++; while (i > 0) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+
+function tile(k, v, d = '') { return `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`; }
+function renderStructTiles() {
+  const t = S.orig, cells = t.rows.length * t.headers.length;
+  const empty = S.profiles.orig.reduce((a, p) => a + p.empty, 0);
+  $('structTiles').innerHTML =
+    tile('행 (데이터 줄)', fmt(t.rows.length), `머리글 제외 · 원본 ${S.aoa.length + ''}줄`) +
+    tile('컬럼', fmt(t.headers.length)) +
+    tile('빈칸', fmt(empty), cells ? `전체 칸의 ${(empty / cells * 100).toFixed(1)}%` : '') +
+    tile('완전히 같은 행', fmt(S.origDup), '두 번 이상 들어간 줄') +
+    tile('전부 빈 행', fmt(S.origBlank));
+}
+
+function hintBadges(p) {
+  const h = p.hints, b = [];
+  if (h.ws) b.push(`<span class="badge warn">앞뒤 공백 ${fmt(h.ws)}</span>`);
+  if (h.ph) b.push(`<span class="badge warn">빈칸 표기(-, N/A, 없음, null) ${fmt(h.ph)}</span>`);
+  if (h.unitNum) b.push(`<span class="badge warn">단위·쉼표 붙은 숫자 ${fmt(h.unitNum)}</span>`);
+  if (h.datePats > 1) b.push(`<span class="badge warn">날짜 형식 ${h.datePats}종 섞임</span>`);
+  if (h.boolForms > 2) b.push(`<span class="badge warn">참/거짓 표기 ${h.boolForms}종</span>`);
+  if (p.outliers) b.push(`<span class="badge bad">극단값 ${fmt(p.outliers)}</span>`);
+  if (p.negatives) b.push(`<span class="badge bad">음수 ${fmt(p.negatives)}</span>`);
+  return b.join('') || '<span class="rn">—</span>';
+}
+function renderSummary() {
+  const ps = S.profiles[S.sumView];
+  let h = `<tr><th class="num">#</th><th>컬럼</th><th>추정 유형</th><th>값 있음</th><th class="num">빈칸</th><th class="num">고유값</th><th class="num">숫자 인식</th><th class="num">평균</th><th class="num">최소 ~ 최대</th><th>많이 나온 값</th><th>감지된 문제</th></tr>`;
+  ps.forEach((p, i) => {
+    const pct = p.n ? p.filled / p.n * 100 : 0;
+    h += `<tr class="clickable" data-col="${esc(p.name)}">
+      <td class="num rn">${i + 1}</td><td><b>${esc(p.name)}</b></td>
+      <td><span class="badge type">${p.type}</span></td>
+      <td><span class="bar"><i style="width:${pct}%"></i></span>${pct.toFixed(0)}%</td>
+      <td class="num">${fmt(p.empty)}</td><td class="num">${fmt(p.unique)}</td><td class="num">${fmt(p.numCount)}</td>
+      <td class="num">${fmt(p.mean)}</td>
+      <td class="num">${p.numCount ? fmt(p.min) + ' ~ ' + fmt(p.max) : '—'}</td>
+      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${p.top.slice(0, 3).map(([v, c]) => `${showVal(v)} <span class="rn">(${fmt(c)})</span>`).join(', ')}</td>
+      <td>${hintBadges(p)}</td></tr>`;
+  });
+  $('sumTable').innerHTML = h;
+}
+
+function renderRules() {
+  if (!RULES.length) {
+    $('ruleList').innerHTML = `<div class="empty">아직 등록된 정제 규칙이 없습니다.<br>규칙이 정해지면 <code>dashboard.html</code>의 <code>RULES</code> 배열에 추가됩니다. 지금은 정제 후 = 원본입니다.</div>`;
+    $('allOn').disabled = $('allOff').disabled = true;
+    return;
+  }
+  const logMap = new Map(S.log.map(l => [l.id, l]));
+  $('ruleList').innerHTML = RULES.map(r => {
+    const l = logMap.get(r.id); let res = '';
+    if (l && l.error) res = `<span class="err">오류: ${esc(l.error)}</span>`;
+    else if (l) {
+      const parts = [];
+      parts.push(`칸 ${fmt(l.changed)}개 변경`);
+      if (l.removed) parts.push(`행 ${fmt(l.removed)}개 제거`);
+      if (l.added) parts.push(`행 ${fmt(l.added)}개 추가`);
+      if (l.colsRemoved) parts.push(`컬럼 ${l.colsRemoved}개 제거`);
+      if (l.colsAdded) parts.push(`컬럼 ${l.colsAdded}개 추가`);
+      res = parts.join(' · ');
+    }
+    const on = S.checked.has(r.id);
+    const cfgHtml = on && r.ui ? `<div class="rule-cfg">${r.ui(S.ruleInput[r.id] || S.orig, S.cfg[r.id])}</div>` : '';
+    return `<div class="rule${on ? ' on' : ''}"><label class="rule-head"><input type="checkbox" data-id="${esc(r.id)}" ${on ? 'checked' : ''}>
+      <div><div class="t">${esc(r.label)}</div>${r.desc ? `<div class="ds">${esc(r.desc)}</div>` : ''}</div>
+      <div class="res">${res}</div></label>${cfgHtml}</div>`;
+  }).join('');
+}
+function renderCleanTiles() {
+  const o = S.orig, c = S.clean;
+  const de = (a, b) => { const d = b - a; return d === 0 ? '변화 없음' : `${d > 0 ? '+' : ''}${fmt(d)}`; };
+  const oe = S.profiles.orig.reduce((a, p) => a + p.empty, 0), ce = S.profiles.clean.reduce((a, p) => a + p.empty, 0);
+  const total = diffTables(o, c);
+  $('cleanTiles').innerHTML =
+    tile('정제 후 행', fmt(c.rows.length), `원본 ${fmt(o.rows.length)} → ${de(o.rows.length, c.rows.length)}`) +
+    tile('정제 후 컬럼', fmt(c.headers.length), `원본 ${fmt(o.headers.length)} → ${de(o.headers.length, c.headers.length)}`) +
+    tile('바뀐 칸', fmt(total.changed), `적용된 규칙 ${S.log.filter(l => !l.error).length}개`) +
+    tile('빈칸', fmt(ce), `원본 ${fmt(oe)} → ${de(oe, ce)}`) +
+    tile('완전히 같은 행', fmt(dupRows(c)), `원본 ${fmt(S.origDup)}`);
+}
+
+function renderColSel() {
+  const names = [...S.orig.headers, ...S.clean.headers.filter(h => !S.orig.headers.includes(h))];
+  if (!names.includes(S.col)) S.col = names[0] || '';
+  $('colSel').innerHTML = names.map(n => `<option ${n === S.col ? 'selected' : ''}>${esc(n)}</option>`).join('');
+}
+function renderCompare() {
+  const name = S.col, oi = S.orig.headers.indexOf(name), ci = S.clean.headers.indexOf(name);
+  const a = oi >= 0 ? S.profiles.orig[oi] : null, b = ci >= 0 ? S.profiles.clean[ci] : null;
+  if (!a && !b) { $('cmpBody').innerHTML = '<div class="empty">컬럼을 고르세요</div>'; return; }
+  let head = '';
+  if (!b) head = `<div class="headline">«${esc(name)}» 컬럼은 정제 과정에서 <span class="delta down">삭제</span>되었습니다</div>`;
+  else if (!a) head = `<div class="headline">«${esc(name)}» 컬럼은 정제 과정에서 <span class="delta up">새로 생긴</span> 컬럼입니다</div>`;
+  else if (a.mean !== null || b.mean !== null) head = `<div class="headline">${esc(name)} 평균 <span class="from">${fmt(a.mean)}</span><span class="arrow">→</span>${fmt(b.mean)}</div>`;
+  else head = `<div class="headline">${esc(name)} 빈칸 <span class="from">${fmt(a.empty)}</span><span class="arrow">→</span>${fmt(b.empty)} · 고유값 <span class="from">${fmt(a.unique)}</span><span class="arrow">→</span>${fmt(b.unique)}</div>`;
+
+  const M = [['행 수', 'n'], ['값 있는 칸', 'filled'], ['빈칸', 'empty'], ['고유값 수', 'unique'], ['숫자로 인식된 값', 'numCount'],
+    ['평균', 'mean'], ['중앙값', 'median'], ['최소', 'min'], ['최대', 'max'], ['합계', 'sum'], ['표준편차', 'std'], ['극단값', 'outliers']];
+  let tb = `<tr><th>지표</th><th class="num">원본</th><th class="num">정제 후</th><th class="num">변화</th></tr>`;
+  for (const [lab, k] of M) {
+    const x = a ? a[k] : null, y = b ? b[k] : null;
+    let d = '—', cls = 'zero';
+    if (typeof x === 'number' && typeof y === 'number') {
+      const dv = y - x;
+      if (Math.abs(dv) > 1e-12) { d = (dv > 0 ? '+' : '') + fmt(dv); cls = dv > 0 ? 'up' : 'down'; } else d = '0';
+    }
+    tb += `<tr><td>${lab}</td><td class="num">${fmt(x)}</td><td class="num">${fmt(y)}</td><td class="num delta ${cls}">${d}</td></tr>`;
+  }
+  tb += `<tr><td>추정 유형</td><td class="num">${a ? a.type : '—'}</td><td class="num">${b ? b.type : '—'}</td><td></td></tr>`;
+
+  const topList = p => p ? `<table><tr><th>값</th><th class="num">개수</th></tr>${p.top.map(([v, c]) => `<tr><td class="ws">${showVal(v)}</td><td class="num">${fmt(c)}</td></tr>`).join('') || '<tr><td colspan="2" class="rn">없음</td></tr>'}</table>` : '<div class="empty">없음</div>';
+
+  // 바뀐 값 목록
+  let changes = '';
+  if (a && b) {
+    const cm = new Map(); for (const r of S.clean.rows) cm.set(r.id, r);
+    const list = []; let total = 0, removed = 0;
+    for (const r of S.orig.rows) {
+      const o = cm.get(r.id);
+      if (!o) { removed++; continue; }
+      if (r.c[oi] !== o.c[ci]) { total++; if (list.length < 200) list.push([r.id, r.c[oi], o.c[ci]]); }
+    }
+    changes = `<h3 style="font-size:14px;margin:16px 0 6px">바뀐 값 ${fmt(total)}개${removed ? ` · 정제로 제거된 행 ${fmt(removed)}개` : ''}${total > 200 ? ' <span class="sub">(앞 200개만 표시)</span>' : ''}</h3>` +
+      (list.length ? `<div class="scroll" style="max-height:300px"><table><tr><th class="num">원본 행</th><th>원본 값</th><th>정제 후 값</th></tr>${list.map(([id, x, y]) => `<tr><td class="num rn">${id}</td><td class="ws">${showVal(x)}</td><td class="ws">${showVal(y)}</td></tr>`).join('')}</table></div>` : '<div class="empty">이 컬럼에서 바뀐 값이 없습니다</div>');
+  }
+
+  $('cmpBody').innerHTML = head +
+    `<div class="grid2"><div class="scroll"><table>${tb}</table></div>
+     <div class="grid2"><div><div class="sub">원본 · 많이 나온 값</div><div class="scroll">${topList(a)}</div></div><div><div class="sub">정제 후 · 많이 나온 값</div><div class="scroll">${topList(b)}</div></div></div></div>` + changes;
+}
+
+function renderPreview() {
+  const t = S.prevView === 'orig' ? S.orig : S.clean;
+  const om = new Map(); if (S.prevView === 'clean') for (const r of S.orig.rows) om.set(r.id, r);
+  const oidx = t.headers.map(h => S.orig.headers.indexOf(h));
+  let h = `<tr><th class="num rn">원본 행</th>${t.headers.map(x => `<th>${esc(x)}</th>`).join('')}</tr>`;
+  for (const r of t.rows.slice(0, 100)) {
+    const o = om.get(r.id);
+    h += `<tr><td class="num rn">${r.id}</td>` + r.c.map((v, i) => {
+      const ch = o && oidx[i] >= 0 && o.c[oidx[i]] !== v;
+      return `<td class="ws${ch ? ' chg' : ''}"${ch ? ` title="원래 값: ${esc(o.c[oidx[i]])}"` : ''}>${showVal(v)}</td>`;
+    }).join('') + '</tr>';
+  }
+  $('prevTable').innerHTML = h;
+}
+
+/* ============================ 다운로드 ============================ */
+function download(text, name, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+function toCSV(t, withRow) {
+  const q = v => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    return /[",\r\n]|^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const hs = withRow ? ['_row', ...t.headers] : t.headers;
+  const lines = [hs.map(q).join(',')];
+  for (const r of t.rows) lines.push((withRow ? [r.id, ...r.c] : r.c).map(q).join(','));
+  return '﻿' + lines.join('\r\n');
+}
+function toJSON(t, withRow) {
+  return JSON.stringify(t.rows.map(r => {
+    const o = withRow ? { _row: r.id } : {};
+    t.headers.forEach((h, i) => { const v = r.c[i]; o[h] = v === '' || v === undefined ? null : v; });
+    return o;
+  }), null, 2);
+}
+const dlBase = () => ($('dlName').value.trim() || S.baseName + '_정제').replace(/[\\/:*?"<>|]/g, '_');
+
+/* ============================ 이벤트 ============================ */
+const drop = $('drop'), fi = $('fileInput');
+drop.onclick = () => fi.click();
+fi.onchange = () => fi.files[0] && loadFile(fi.files[0]);
+['dragenter', 'dragover'].forEach(e => document.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(e => document.addEventListener(e, ev => { ev.preventDefault(); if (e === 'drop' || ev.target === drop) drop.classList.remove('over'); }));
+document.addEventListener('drop', ev => { const f = ev.dataTransfer.files[0]; if (f) loadFile(f); });
+
+$('sheetSel').onchange = e => selectSheet(e.target.value);
+$('encSel').onchange = () => { S.aoaCache = {}; selectSheet(S.sheet); };
+$('hdrInput').onchange = e => setHeaderRow((parseInt(e.target.value, 10) || 1) - S.rowOffset - 1);
+$('rawTable').onclick = e => { const tr = e.target.closest('tr[data-r]'); if (tr) setHeaderRow(+tr.dataset.r); };
+$('sumTable').onclick = e => {
+  const tr = e.target.closest('tr[data-col]'); if (!tr) return;
+  S.col = tr.dataset.col; renderColSel(); renderCompare();
+  $('cmpCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+$('ruleList').onchange = e => {
+  const el = e.target;
+  if (el.dataset.cfg) {
+    const r = RULES.find(x => x.id === el.dataset.rule); if (!r) return;
+    const res = r.onCfg(el, S.cfg[r.id]);
+    if (res === 'ui') renderRules(); else if (res) recompute();
+    return;
+  }
+  const id = el.dataset.id; if (!id) return;
+  e.target.checked ? S.checked.add(id) : S.checked.delete(id);
+  recompute();
+};
+$('allOn').onclick = () => { RULES.forEach(r => S.checked.add(r.id)); recompute(); };
+$('allOff').onclick = () => { S.checked.clear(); recompute(); };
+$('colSel').onchange = e => { S.col = e.target.value; renderCompare(); };
+function segBind(id, key, after) {
+  $(id).onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...$(id).children].forEach(x => x.classList.toggle('on', x === b));
+    S[key] = b.dataset.v; after();
+  };
+}
+segBind('sumSeg', 'sumView', renderSummary);
+segBind('prevSeg', 'prevView', renderPreview);
+$('dlCsv').onclick = () => download(toCSV(S.clean, $('dlRowNo').checked), dlBase() + '.csv', 'text/csv;charset=utf-8');
+$('dlJson').onclick = () => download(toJSON(S.clean, $('dlRowNo').checked), dlBase() + '.json', 'application/json');
+
+// 테마
+(function () {
+  let t = 'auto'; try { t = localStorage.getItem('dq-theme') || 'auto'; } catch {}
+  const apply = v => {
+    if (v === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', v);
+    [...$('themeSeg').children].forEach(b => b.classList.toggle('on', b.dataset.t === v));
+  };
+  apply(t);
+  $('themeSeg').onclick = e => { const b = e.target.closest('button'); if (!b) return; apply(b.dataset.t); try { localStorage.setItem('dq-theme', b.dataset.t); } catch {} };
+})();
+</script>
+</body>
+</html>
