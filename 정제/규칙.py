@@ -49,26 +49,52 @@ def blank_marks(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 # ----------------------------------------------------------------- 다. 날짜 모양 맞추기
 _DATE_SEP = re.compile(r"([0-9]{4})\s*([-./])\s*([0-9]{1,2})\s*\2\s*([0-9]{1,2})\s*\.?")
 _DATE_KO = re.compile(r"([0-9]{4})\s*년\s*([0-9]{1,2})\s*월\s*([0-9]{1,2})\s*일")
+_DATE_YLAST = re.compile(r"([0-9]{1,2})\s*/\s*([0-9]{1,2})\s*/\s*([0-9]{4})")
+_DATE_8 = re.compile(r"([0-9]{4})([0-9]{2})([0-9]{2})")
 
 
-def to_iso_date(v: str) -> str | None:
-    """연도가 앞에 오는 날짜만 YYYY-MM-DD 로. 아니면 None (= 그대로 둔다).
-
-    바꾸는 것: 2025/03/14, 2025.3.14, 2025. 3. 14., 2025-3-14, 2025년 3월 14일
-    두는 것: 03/14/2025(연도가 뒤), 2025-02-30(없는 날짜), 시간이 붙은 값, 20250314(구분 없는 숫자)
-    """
-    m = _DATE_SEP.fullmatch(v)
-    if m:
-        y, mo, d = int(m[1]), int(m[3]), int(m[4])
-    else:
-        m = _DATE_KO.fullmatch(v)
-        if not m:
-            return None
-        y, mo, d = int(m[1]), int(m[2]), int(m[3])
+def _iso(y: int, mo: int, d: int) -> str | None:
     try:
         return dt.date(y, mo, d).isoformat()
     except ValueError:
         return None
+
+
+def _year_last(a: int, b: int, y: int) -> str | None:
+    """숫자/숫자/4자리 에서 어느 쪽이 달인지 소거법으로 정한다.
+
+    한쪽이 12보다 크면 그쪽은 달이 될 수 없으니 일, 다른 쪽이 달 (12/18/2026 → 18은 일, 12는 달).
+    그렇게 정한 년·월·일이 실제로 있는 날짜일 때만 바꾼다.
+    둘 다 12 이하이고 서로 다르면(6/7/2026) 달·일을 가를 근거가 없으니 None (= 그대로 둔다).
+    """
+    if a > 12 and b > 12:
+        return None
+    if a > 12:
+        return _iso(y, b, a)
+    if b > 12:
+        return _iso(y, a, b)
+    if a == b:
+        return _iso(y, a, b)
+    return None
+
+
+def to_iso_date(v: str) -> str | None:
+    """날짜로 확정할 수 있는 값만 YYYY-MM-DD 로. 아니면 None (= 그대로 둔다).
+
+    바꾸는 것: 2025/03/14, 2025.3.14, 2025. 3. 14., 2025-3-14, 2026년6월19일, 2025년 3월 14일,
+             12/18/2026·18/12/2026(4자리=연도, 12보다 큰 쪽=일, 나머지=달),
+             20260615(앞 4자리=연도, 뒤 4자리=MMDD)
+    두는 것: 6/7/2026(달·일 구분 불가), 2025-02-30·20261345(없는 날짜), 시간이 붙은 값
+    """
+    for pat in (_DATE_SEP, _DATE_KO, _DATE_8):
+        m = pat.fullmatch(v)
+        if m:
+            g = [x for x in m.groups() if x.isdigit()]
+            return _iso(int(g[0]), int(g[1]), int(g[2]))
+    m = _DATE_YLAST.fullmatch(v)
+    if m:
+        return _year_last(int(m[1]), int(m[2]), int(m[3]))
+    return None
 
 
 def dates(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
@@ -217,8 +243,9 @@ RULES: list[Rule] = [
     Rule("blank", "나. 빈칸 표기 맞추기",
          "칸 전체가 - · N/A · 없음 · null 인 경우만 빈칸으로 바꿉니다. 0, 미응답 같은 값은 그대로 둡니다.", blank_marks),
     Rule("date", "다. 날짜 모양 맞추기",
-         "2025/03/14 · 2025.3.14 · 2025년 3월 14일처럼 연도가 앞에 오는 날짜를 2025-03-14로 바꿉니다. "
-         "03/14/2025처럼 연도가 뒤에 오는 모양, 시간이 붙은 값, 없는 날짜는 그대로 둡니다.", dates),
+         "2025/03/14 · 2025.3.14 · 2025년 3월 14일 · 20250314를 2025-03-14로 바꿉니다. "
+         "12/18/2026처럼 연도가 뒤에 오면 12보다 큰 쪽을 일, 나머지를 달로 봅니다. "
+         "6/7/2026처럼 달·일을 가를 수 없는 값, 시간이 붙은 값, 없는 날짜는 그대로 둡니다.", dates),
     Rule("num", "라. 숫자 다듬기",
          "89,000원 → 89000, 12% → 12처럼 천 단위 쉼표와 뒤에 붙은 원·점·건·개·분·%만 뗍니다. "
          "단위 환산은 하지 않습니다. (₩ 같은 앞 기호, 그 밖의 단위는 그대로)", tidy_numbers),
