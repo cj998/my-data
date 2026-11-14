@@ -9,6 +9,7 @@ __pycache__/
 *.csv
 *.xlsx
 *.xls
+!data/*.xlsx
 
 # 설정 파일 (json) — 저장소에 넣지 않는다
 *.json
