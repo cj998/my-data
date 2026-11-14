@@ -12,6 +12,7 @@ __pycache__/
 
 # 설정 파일 (json) — 저장소에 넣지 않는다
 *.json
+!vercel.json
 
 # 정리/ 는 스크립트 코드만
 정리/*
